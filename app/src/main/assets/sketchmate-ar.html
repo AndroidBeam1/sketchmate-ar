@@ -1,0 +1,1280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>Sketchmate AR</title>
+    <!-- No webfonts: the page must work fully offline inside an Android
+         WebView, so all type uses fonts already on the device. The room
+         networking library below is the one exception — friend rooms need
+         the internet by nature, and every use of it is guarded so the
+         rest of the app runs fine when it cannot load. -->
+    <script src="peerjs.min.js"></script>
+    <style>
+      :root{
+        --bg:#fdf6ec;
+        --paper:#fffdf8;
+        --paper2:#fff4e0;
+        --ink:#22304a;
+        --ink-soft:#5a6a86;
+        --line:#e7d9c3;
+        --accent:#ff6b4a;
+        --accent-ink:#ffffff;
+        --teal:#0e7c86;
+        --sun:#ffc93c;
+        --good:#2e9e5b;
+        --bad:#d64545;
+        --shadow:0 2px 0 rgba(34,48,74,.12), 0 10px 24px rgba(34,48,74,.08);
+        --radius:16px;
+      }
+      @media (prefers-color-scheme: dark){
+        :root{
+          --bg:#14161d;
+          --paper:#1e222d;
+          --paper2:#262b38;
+          --ink:#eef1f8;
+          --ink-soft:#a7b1c6;
+          --line:#39415a;
+          --accent:#ff7d5f;
+          --teal:#2fb3c0;
+          --shadow:0 2px 0 rgba(0,0,0,.35), 0 10px 24px rgba(0,0,0,.35);
+        }
+      }
+      *{ box-sizing:border-box; }
+      html,body{ margin:0; padding:0; }
+      body{
+        background:var(--bg);
+        color:var(--ink);
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+        font-size:16px;
+        line-height:1.45;
+        -webkit-tap-highlight-color: transparent;
+      }
+      h1,h2,h3,.hand{ font-family:"Segoe Print","Bradley Hand","Chalkboard SE","Comic Sans MS",system-ui,cursive; font-weight:700; letter-spacing:.01em; }
+      button, [role="button"], select, input:not([type="checkbox"],[type="radio"]){ min-height:2.75rem; }
+      button{ font-family:inherit; cursor:pointer; }
+      main{ max-width:1060px; margin:0 auto; padding:0 14px 56px; }
+
+      /* ---------- tab bar ---------- */
+      .tabbar{
+        position:sticky; top:0; z-index:40;
+        background:var(--bg);
+        padding:10px 0 8px;
+      }
+      .tabs{
+        display:flex; gap:8px;
+        background:var(--paper);
+        border:2px solid var(--line);
+        border-radius:999px;
+        padding:5px;
+        box-shadow:var(--shadow);
+      }
+      .tab{
+        flex:1; border:none; background:transparent; color:var(--ink-soft);
+        border-radius:999px; font-size:1rem; font-weight:800; padding:10px 4px;
+        display:flex; align-items:center; justify-content:center; gap:7px;
+      }
+      .tab svg{ width:21px; height:21px; flex:none; }
+      .tab[aria-selected="true"]{ background:var(--ink); color:#fff; }
+      @media (prefers-color-scheme: dark){ .tab[aria-selected="true"]{ background:var(--accent); color:#fff; } }
+      .tab .lbl-sm{ display:none; }
+      @media (max-width:430px){ .tab{ font-size:.86rem; } .tab svg{ width:18px; height:18px; } }
+
+      .panel{ display:none; padding-top:14px; }
+      .panel.active{ display:block; }
+      .lead{ color:var(--ink-soft); margin:2px 0 16px; font-size:1.02rem; }
+      .lead strong{ color:var(--ink); }
+
+      /* ---------- buttons ---------- */
+      .btn{
+        border:2px solid var(--ink); background:var(--paper); color:var(--ink);
+        border-radius:12px; padding:9px 16px; font-weight:800; font-size:.98rem;
+        display:inline-flex; align-items:center; justify-content:center; gap:8px;
+        box-shadow:0 2px 0 var(--ink);
+      }
+      .btn:active{ transform:translateY(2px); box-shadow:none; }
+      .btn.primary{ background:var(--accent); border-color:var(--ink); color:#fff; }
+      .btn.teal{ background:var(--teal); border-color:var(--ink); color:#fff; }
+      .btn.sun{ background:var(--sun); color:#22304a; }
+      .btn.ghost{ box-shadow:none; border-color:var(--line); }
+      .btn.small{ min-height:2.4rem; padding:6px 12px; font-size:.9rem; }
+      .btn:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
+      .btn svg{ width:19px; height:19px; flex:none; }
+
+      /* ---------- library grid ---------- */
+      .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(158px,1fr)); gap:14px; }
+      .card{
+        background:var(--paper); border:2px solid var(--line); border-radius:var(--radius);
+        padding:12px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:9px;
+      }
+      .card .thumb{
+        background:#ffffff; border:2px dashed var(--line); border-radius:10px;
+        aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; overflow:hidden;
+      }
+      .card .thumb svg{ width:88%; height:88%; }
+      .card .thumb img{ width:100%; height:100%; object-fit:contain; }
+      .card h3{ margin:0; font-size:1.18rem; line-height:1.1; }
+      .card .row{ display:flex; gap:8px; margin-top:auto; }
+      .card .row .btn{ flex:1; padding:7px 6px; font-size:.88rem; }
+
+      .photo-card{ grid-column:1 / -1; }
+      .photo-flex{ display:flex; gap:16px; flex-wrap:wrap; }
+      .photo-flex .thumb{ flex:0 0 190px; aspect-ratio:1/1; }
+      .photo-controls{ flex:1; min-width:230px; display:flex; flex-direction:column; gap:10px; }
+      .seg{ display:flex; border:2px solid var(--line); border-radius:12px; overflow:hidden; }
+      .seg button{ flex:1; border:none; background:var(--paper); color:var(--ink-soft); font-weight:800; padding:8px; }
+      .seg button[aria-pressed="true"]{ background:var(--ink); color:#fff; }
+      @media (prefers-color-scheme: dark){ .seg button[aria-pressed="true"]{ background:var(--accent); } }
+
+      label.ctl{ display:flex; flex-direction:column; gap:4px; font-weight:700; font-size:.92rem; color:var(--ink-soft); }
+      label.ctl output{ color:var(--ink); font-weight:800; }
+      input[type="range"]{ width:100%; accent-color:var(--accent); min-height:2rem; }
+      input[type="text"], select{
+        font:inherit; font-weight:700; color:var(--ink);
+        background:var(--paper); border:2px solid var(--line); border-radius:12px; padding:9px 12px;
+      }
+      input[type="text"]:focus, select:focus{ outline:3px solid var(--sun); outline-offset:1px; }
+
+      /* ---------- AR stage ---------- */
+      .stage{
+        position:relative; border-radius:20px; overflow:hidden; background:#0c0f16;
+        border:2px solid var(--line); box-shadow:var(--shadow);
+        height:min(66vh,640px); min-height:380px;
+        touch-action:none; user-select:none; -webkit-user-select:none;
+      }
+      .stage video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+      .stage .no-cam{
+        position:absolute; inset:0; display:flex; flex-direction:column; gap:10px;
+        align-items:center; justify-content:center; text-align:center; padding:24px;
+        color:#dfe6f5; background:
+          radial-gradient(circle at 20% 15%, #232c44 0, transparent 45%),
+          radial-gradient(circle at 85% 90%, #1d2b3a 0, transparent 50%), #12151f;
+      }
+      .stage .no-cam h3{ margin:0; font-size:1.5rem; color:#fff; }
+      .stage .no-cam p{ margin:0; max-width:420px; color:#aeb9d0; }
+      #arOverlay{
+        position:absolute; left:50%; top:50%; width:68%;
+        transform:translate(-50%,-50%);
+        filter:drop-shadow(0 0 1px rgba(255,255,255,.9));
+        cursor:grab; touch-action:none;
+      }
+      #arOverlay.locked{ cursor:default; }
+      .stage .badge{
+        position:absolute; left:12px; top:12px; z-index:5;
+        background:rgba(10,13,20,.72); color:#fff; border-radius:999px;
+        padding:6px 13px; font-weight:800; font-size:.85rem; display:flex; gap:7px; align-items:center;
+      }
+      .stage .badge .dot{ width:9px; height:9px; border-radius:50%; background:var(--bad); }
+      .stage .badge.live .dot{ background:#43d17c; }
+      .ctl-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 20px; margin-top:16px; }
+      .ctl-card{ background:var(--paper); border:2px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow); }
+      .ctl-card h3{ margin:0 0 10px; font-size:1.15rem; }
+      .btn-row{ display:flex; flex-wrap:wrap; gap:9px; }
+      .hint{ font-size:.9rem; color:var(--ink-soft); margin:10px 0 0; }
+      .hint strong{ color:var(--ink); }
+
+      /* ---------- draw together ---------- */
+      .draw-layout{ display:flex; flex-direction:column; gap:14px; }
+      .paper-wrap{
+        position:relative; background:#fff; border:2px solid var(--line); border-radius:18px;
+        overflow:hidden; box-shadow:var(--shadow);
+      }
+      .paper-wrap .underlay{
+        position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
+      }
+      .paper-wrap .underlay svg, .paper-wrap .underlay img{ width:82%; height:82%; object-fit:contain; opacity:.20; }
+      #pad{ display:block; width:100%; height:auto; touch-action:none; position:relative; z-index:2; }
+      .toolbar{
+        background:var(--paper); border:2px solid var(--line); border-radius:var(--radius);
+        padding:12px 14px; box-shadow:var(--shadow);
+        display:flex; flex-wrap:wrap; gap:12px 18px; align-items:center;
+      }
+      .tool-group{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+      .tool-group .tlabel{ font-weight:800; font-size:.85rem; color:var(--ink-soft); }
+      .swatch{
+        width:42px; height:42px; border-radius:50%; border:3px solid var(--line);
+        padding:0; min-height:42px;
+      }
+      .swatch[aria-pressed="true"]{ border-color:var(--ink); transform:scale(1.1); }
+      .tool-btn{
+        border:2px solid var(--line); background:var(--paper2); color:var(--ink);
+        border-radius:11px; padding:8px 13px; font-weight:800; display:inline-flex; gap:7px; align-items:center;
+      }
+      .tool-btn[aria-pressed="true"]{ background:var(--ink); color:#fff; border-color:var(--ink); }
+      .tool-btn svg{ width:18px; height:18px; }
+      input[type="range"].brush{ width:110px; }
+
+      .mode-cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px; }
+      .mode-card{ background:var(--paper); border:2px solid var(--line); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow); }
+      .mode-card h3{ margin:0 0 4px; font-size:1.3rem; display:flex; align-items:center; gap:9px; }
+      .mode-card h3 .face{ width:34px; height:34px; flex:none; }
+      .mode-card p{ margin:0 0 12px; color:var(--ink-soft); font-size:.95rem; }
+      .mode-card .stack{ display:flex; flex-direction:column; gap:9px; }
+      .mode-card .inline{ display:flex; gap:8px; }
+      .mode-card .inline input{ flex:1; min-width:0; text-transform:uppercase; }
+      .status-line{ font-weight:800; font-size:.93rem; min-height:1.4em; }
+      .status-line.ok{ color:var(--good); }
+      .status-line.warn{ color:var(--bad); }
+      .room-code{
+        font-family:"Segoe Print","Bradley Hand","Chalkboard SE","Comic Sans MS",cursive; font-weight:700; font-size:2rem; letter-spacing:.35em; text-align:center;
+        background:var(--paper2); border:2px dashed var(--teal); border-radius:12px; padding:6px 6px 6px 14px;
+      }
+      .pivot-says{
+        display:flex; gap:11px; align-items:flex-start;
+        background:var(--paper2); border:2px solid var(--line); border-radius:var(--radius); padding:12px 14px;
+      }
+      .pivot-says .face{ width:44px; height:44px; flex:none; }
+      .pivot-says p{ margin:3px 0 0; font-size:1rem; }
+      .pivot-says .who{ font-family:"Segoe Print","Bradley Hand","Chalkboard SE","Comic Sans MS",cursive; font-weight:700; font-size:1.05rem; color:var(--teal); }
+      .who-draws{ display:flex; gap:8px; flex-wrap:wrap; }
+      .who-chip{
+        border:2px solid var(--line); background:var(--paper); border-radius:999px;
+        padding:5px 13px; font-weight:800; font-size:.88rem; display:inline-flex; gap:7px; align-items:center;
+      }
+      .who-chip .dot{ width:10px; height:10px; border-radius:50%; }
+      .sr-only{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+      .toast{
+        position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(80px);
+        background:var(--ink); color:#fff; font-weight:800; padding:12px 20px; border-radius:999px;
+        box-shadow:0 12px 30px rgba(0,0,0,.3); z-index:99; transition:transform .25s ease, visibility .25s;
+        max-width:92vw; text-align:center; visibility:hidden;
+      }
+      .toast.show{ transform:translateX(-50%) translateY(0); visibility:visible; }
+      @media (prefers-reduced-motion: reduce){ .toast{ transition:none; } .btn:active{ transform:none; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav class="tabbar" aria-label="Sketchmate AR sections">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" id="tabBtn-library" aria-selected="true" data-tab="library">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.5-4.5L6 21"/></svg>
+            Pictures
+          </button>
+          <button class="tab" role="tab" id="tabBtn-ar" aria-selected="false" data-tab="ar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            AR Trace
+          </button>
+          <button class="tab" role="tab" id="tabBtn-draw" aria-selected="false" data-tab="draw">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+            Draw Together
+          </button>
+        </div>
+      </nav>
+
+      <!-- ================= PICTURES ================= -->
+      <section class="panel active" id="panel-library" role="tabpanel" aria-labelledby="tabBtn-library">
+        <p class="lead">Pick a picture, then <strong>Trace in AR</strong> to float it over your paper through the camera, or <strong>Draw it</strong> to copy it on the drawing paper. Every picture is plain black-and-white line art, ready to trace.</p>
+        <div class="grid" id="libraryGrid"></div>
+
+        <div class="grid" style="margin-top:14px;">
+          <article class="card photo-card">
+            <h3>Use your own photo</h3>
+            <div class="photo-flex">
+              <div class="thumb" id="photoThumb">
+                <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="#9aa7bd" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.5-4.5L6 21"/></svg>
+              </div>
+              <div class="photo-controls">
+                <p class="hint" style="margin:0;">Pick any photo — a cartoon, a pet, anything — and it turns into black-and-white lines you can trace, all at once.</p>
+                <div class="btn-row">
+                  <label class="btn primary" for="photoInput" style="margin:0;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+                    Choose a photo
+                  </label>
+                  <input type="file" id="photoInput" accept="image/*" class="sr-only" />
+                </div>
+                <div class="seg" role="group" aria-label="Photo conversion style">
+                  <button id="photoModeEdges" aria-pressed="true">Outline (edges)</button>
+                  <button id="photoModeShades" aria-pressed="false">Black &amp; white shading</button>
+                </div>
+                <label class="ctl">Line strength <output id="photoThreshOut">110</output>
+                  <input type="range" id="photoThresh" min="25" max="220" value="110" />
+                </label>
+                <div class="btn-row">
+                  <button class="btn teal" id="photoToAR" disabled>Trace photo in AR</button>
+                  <button class="btn" id="photoToDraw" disabled>Draw over photo lines</button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ================= AR TRACE ================= -->
+      <section class="panel" id="panel-ar" role="tabpanel" aria-labelledby="tabBtn-ar">
+        <p class="lead">Point your phone camera down at a blank sheet of paper. The picture floats on top — <strong>follow the lines on the screen and draw them on the paper underneath</strong>. Prop the phone on a cup or stack of books so both hands stay free.</p>
+
+        <div class="stage" id="arStage">
+          <video id="camVideo" autoplay playsinline muted></video>
+          <div class="no-cam" id="noCam">
+            <h3 class="hand">Camera is off</h3>
+            <p>Tap “Turn camera on” and allow camera access. AR tracing uses your phone camera only — it never records or sends video anywhere.</p>
+            <button class="btn primary" id="camStartBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Turn camera on
+            </button>
+            <p id="camError" class="hint" style="color:#f0a3a3;"></p>
+          </div>
+          <div class="badge" id="camBadge"><span class="dot"></span><span id="camBadgeText">Camera off</span></div>
+          <img id="arOverlay" alt="Picture to trace, floating over the camera view" draggable="false" style="display:none" />
+        </div>
+
+        <div class="ctl-grid">
+          <div class="ctl-card">
+            <h3>Picture</h3>
+            <label class="ctl">What to trace
+              <select id="arSelect"></select>
+            </label>
+            <p class="hint">Want your own photo here? Make it on the <strong>Pictures</strong> tab first, then tap “Trace photo in AR”.</p>
+          </div>
+          <div class="ctl-card">
+            <h3>Fit it to your paper</h3>
+            <label class="ctl">See-through <output id="arOpacityOut">55%</output>
+              <input type="range" id="arOpacity" min="10" max="100" value="55" />
+            </label>
+            <label class="ctl">Size <output id="arSizeOut">68%</output>
+              <input type="range" id="arSize" min="25" max="130" value="68" />
+            </label>
+            <label class="ctl">Turn <output id="arRotateOut">0°</output>
+              <input type="range" id="arRotate" min="-180" max="180" value="0" />
+            </label>
+            <div class="btn-row" style="margin-top:8px;">
+              <button class="btn small" id="arFlip">Flip sideways</button>
+              <button class="btn small" id="arCenter">Center it</button>
+              <button class="btn small teal" id="arLock" aria-pressed="false">Lock in place</button>
+            </div>
+            <p class="hint">Drag the picture with a finger to move it. <strong>Lock it</strong> once it lines up with your paper so it can’t slide around.</p>
+          </div>
+          <div class="ctl-card">
+            <h3>Camera</h3>
+            <div class="btn-row">
+              <button class="btn small" id="camStopBtn" disabled>Turn camera off</button>
+              <button class="btn small" id="torchBtn" disabled>Flashlight</button>
+            </div>
+            <p class="hint">The flashlight helps when your paper is in shadow. Not every phone allows it from a web page — if the button stays off, use a lamp instead.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= DRAW TOGETHER ================= -->
+      <section class="panel" id="panel-draw" role="tabpanel" aria-labelledby="tabBtn-draw">
+        <p class="lead">One sheet of paper, shared. Draw by yourself, draw along with <strong>Pivot Mate</strong>, or invite a <strong>friend</strong> with a room code — friends only, never random strangers. Your Undo and Clear buttons only erase <em>your own</em> lines, so nobody can scribble over your part and wreck it.</p>
+
+        <div class="draw-layout">
+          <div class="pivot-says" id="pivotSays">
+            <svg class="face" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="#ffc93c" stroke="#22304a" stroke-width="2.5"/><circle cx="17" cy="21" r="2.6" fill="#22304a"/><circle cx="31" cy="21" r="2.6" fill="#22304a"/><path d="M15 30c3 4 6 5.5 9 5.5S30 34 33 30" fill="none" stroke="#22304a" stroke-width="2.5" stroke-linecap="round"/><path d="M8 12l3-5 3 4M40 12l-3-5-3 4" fill="none" stroke="#22304a" stroke-width="2.5" stroke-linecap="round"/></svg>
+            <div>
+              <span class="who">Pivot Mate says</span>
+              <p id="pivotText">Hi! Pick a picture below and I’ll draw it one part at a time — you draw the same part right after me, and we finish it together.</p>
+            </div>
+          </div>
+
+          <div class="who-draws" id="whoDraws" aria-label="Who is drawing on this paper"></div>
+
+          <div class="paper-wrap" id="paperWrap">
+            <div class="underlay" id="underlay"></div>
+            <canvas id="pad" width="1200" height="900" aria-label="Shared drawing paper. Draw with your finger or mouse."></canvas>
+          </div>
+
+          <div class="toolbar" aria-label="Drawing tools">
+            <div class="tool-group" role="group" aria-label="Pen colors">
+              <span class="tlabel">Pen</span>
+              <span id="colorRow"></span>
+            </div>
+            <div class="tool-group">
+              <span class="tlabel">Thick</span>
+              <input type="range" class="brush" id="brushSize" min="2" max="26" value="6" aria-label="Brush thickness" />
+            </div>
+            <div class="tool-group">
+              <button class="tool-btn" id="eraserBtn" aria-pressed="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+                Eraser
+              </button>
+              <button class="tool-btn" id="undoBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                Undo mine
+              </button>
+              <button class="tool-btn" id="clearMineBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Clear mine
+              </button>
+              <button class="tool-btn" id="saveBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+                Save picture
+              </button>
+            </div>
+            <div class="tool-group">
+              <span class="tlabel">Guide</span>
+              <select id="guideSelect" aria-label="Faint guide picture under the paper"></select>
+              <button class="tool-btn" id="guideToggle" aria-pressed="false">Show guide</button>
+            </div>
+          </div>
+
+          <div class="mode-cards">
+            <div class="mode-card">
+              <h3>
+                <svg class="face" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21" fill="#ffc93c" stroke="#22304a" stroke-width="2.5"/><circle cx="17" cy="21" r="2.6" fill="#22304a"/><circle cx="31" cy="21" r="2.6" fill="#22304a"/><path d="M15 30c3 4 6 5.5 9 5.5S30 34 33 30" fill="none" stroke="#22304a" stroke-width="2.5" stroke-linecap="round"/><path d="M8 12l3-5 3 4M40 12l-3-5-3 4" fill="none" stroke="#22304a" stroke-width="2.5" stroke-linecap="round"/></svg>
+                Draw with Pivot Mate
+              </h3>
+              <p>Pivot Mate lives right inside this app — no internet partner, no strangers. It draws one part, then waits while you draw yours.</p>
+              <div class="stack">
+                <label class="ctl">Picture for Pivot to draw
+                  <select id="pivotSelect"></select>
+                </label>
+                <div class="btn-row">
+                  <button class="btn teal" id="pivotNext">Pivot, draw the next part</button>
+                  <button class="btn" id="pivotAll">Draw it all</button>
+                  <button class="btn ghost" id="pivotReset">Start picture over</button>
+                </div>
+                <p class="status-line" id="pivotStatus">Pivot is ready when you are.</p>
+              </div>
+            </div>
+
+            <div class="mode-card">
+              <h3>Draw with a friend</h3>
+              <p>Friends only: your friend must type in your room code. Nobody random can wander in. You both draw on this same paper, live.</p>
+              <div class="stack">
+                <label class="ctl">Your name
+                  <input type="text" id="myName" maxlength="16" placeholder="e.g. Melinda" autocomplete="off" />
+                </label>
+                <button class="btn primary" id="createRoomBtn">Create a room</button>
+                <div class="room-code" id="roomCodeBox" hidden>––––</div>
+                <div class="inline">
+                  <input type="text" id="joinCode" maxlength="4" placeholder="CODE" aria-label="Room code to join" autocomplete="off" />
+                  <button class="btn" id="joinRoomBtn">Join room</button>
+                </div>
+                <button class="btn ghost" id="leaveRoomBtn" disabled>Leave room</button>
+                <p class="status-line" id="roomStatus">Not in a room — drawing on your own paper.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <!-- hidden stage where Pivot Mate measures picture paths -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><g id="measureStage"></g></svg>
+
+    <script>
+    "use strict";
+    /* ============================================================
+       Sketchmate AR — all state lives in memory for this session.
+       ============================================================ */
+    const $ = (id) => document.getElementById(id);
+    const SVGNS = "http://www.w3.org/2000/svg";
+
+    function circ(cx, cy, r){ return "M " + (cx - r) + " " + cy + " A " + r + " " + r + " 0 1 1 " + (cx + r) + " " + cy + " A " + r + " " + r + " 0 1 1 " + (cx - r) + " " + cy + " Z"; }
+    function ell(cx, cy, rx, ry){ return "M " + (cx - rx) + " " + cy + " A " + rx + " " + ry + " 0 1 1 " + (cx + rx) + " " + cy + " A " + rx + " " + ry + " 0 1 1 " + (cx - rx) + " " + cy + " Z"; }
+
+    /* Each drawing: named parts, in the order Pivot Mate draws them. */
+    const DRAWINGS = [
+      { id:"cat", name:"Cat face", parts:[
+        ["Head","M62 122 C62 74 90 50 120 50 C150 50 178 74 178 122 C178 166 150 188 120 188 C90 188 62 166 62 122 Z"],
+        ["Left ear","M70 80 L58 36 L100 58"], ["Right ear","M170 80 L182 36 L140 58"],
+        ["Left eye", circ(96,116,7)], ["Right eye", circ(144,116,7)],
+        ["Nose","M111 140 L129 140 L120 151 Z"],
+        ["Mouth","M120 151 C120 161 108 164 99 157 M120 151 C120 161 132 164 141 157"],
+        ["Whiskers","M38 132 L80 139 M40 158 L80 149 M202 132 L160 139 M200 158 L160 149"] ] },
+      { id:"dog", name:"Dog face", parts:[
+        ["Head","M120 54 C158 54 180 86 180 126 C180 166 154 190 120 190 C86 190 60 166 60 126 C60 86 82 54 120 54 Z"],
+        ["Left ear","M64 68 C40 78 36 130 54 152 C68 164 79 140 77 108 C75 82 72 62 64 68 Z"],
+        ["Right ear","M176 68 C200 78 204 130 186 152 C172 164 161 140 163 108 C165 82 168 62 176 68 Z"],
+        ["Left eye", circ(96,114,7)], ["Right eye", circ(144,114,7)],
+        ["Snout", ell(120,156,29,20)],
+        ["Nose","M107 148 L133 148 L120 163 Z"],
+        ["Tongue","M111 174 C111 196 129 196 129 174"] ] },
+      { id:"fish", name:"Fish", parts:[
+        ["Body","M28 120 C58 74 118 58 164 84 C190 99 190 141 164 156 C118 182 58 166 28 120 Z"],
+        ["Tail","M164 86 L212 62 L212 178 L164 154"],
+        ["Eye", circ(68,110,7)],
+        ["Gill","M104 80 C90 104 90 136 104 160"],
+        ["Stripe","M140 70 C128 98 128 142 140 170"],
+        ["Fins","M96 84 C110 66 132 62 142 70 M96 156 C110 174 132 178 142 170"],
+        ["Bubbles", circ(38,58,6) + " " + circ(54,36,8)] ] },
+      { id:"flower", name:"Flower", parts:[
+        ["Top petal", circ(120,70,17)], ["Upper right petal", circ(148,90,17)], ["Lower right petal", circ(142,124,17)],
+        ["Lower left petal", circ(98,124,17)], ["Upper left petal", circ(92,90,17)],
+        ["Middle", circ(120,102,17)],
+        ["Stem","M120 119 C120 160 116 185 118 208"],
+        ["Leaf","M119 172 C96 160 82 168 78 184 C94 192 112 186 119 172 Z"],
+        ["Ground","M56 210 C90 202 150 202 184 210"] ] },
+      { id:"house", name:"House", parts:[
+        ["Walls","M62 118 L62 202 L178 202 L178 118"],
+        ["Roof","M44 120 L120 58 L196 120"],
+        ["Chimney","M152 82 L152 56 L172 56 L172 96"],
+        ["Door","M104 202 L104 156 L136 156 L136 202"],
+        ["Doorknob", circ(129,180,3)],
+        ["Window", "M72 138 L96 138 L96 164 L72 164 Z M84 138 L84 164 M72 151 L96 151"],
+        ["Sun", circ(204,40,13) + " M204 18 L204 24 M204 56 L204 62 M182 40 L188 40 M220 40 L226 40"],
+        ["Path","M108 214 L120 204 L132 214"] ] },
+      { id:"rocket", name:"Rocket", parts:[
+        ["Body","M120 22 C146 46 152 84 152 118 L88 118 C88 84 94 46 120 22 Z"],
+        ["Window", circ(120,78,17)],
+        ["Left fin","M88 108 C66 130 60 156 62 176 L88 160"],
+        ["Right fin","M152 108 C174 130 180 156 178 176 L152 160"],
+        ["Bottom","M88 118 L88 160 L152 160 L152 118"],
+        ["Flames","M104 160 C104 182 112 190 120 204 C128 190 136 182 136 160"],
+        ["Stars", circ(44,52,3) + " " + circ(198,66,3) + " " + circ(186,150,3) + " " + circ(52,140,3)] ] },
+      { id:"butterfly", name:"Butterfly", parts:[
+        ["Upper left wing", ell(84,94,34,26)], ["Upper right wing", ell(156,94,34,26)],
+        ["Lower left wing", ell(88,146,28,22)], ["Lower right wing", ell(152,146,28,22)],
+        ["Body", ell(120,122,10,44)],
+        ["Head", circ(120,66,11)],
+        ["Antennae","M114 58 C102 44 92 40 84 42 M126 58 C138 44 148 40 156 42"],
+        ["Wing spots", circ(84,94,9) + " " + circ(156,94,9)] ] },
+      { id:"sponge", name:"Sea sponge", parts:[
+        ["Body","M84 210 C76 160 82 110 92 74 C96 56 108 48 120 48 C132 48 144 56 148 74 C158 110 164 160 156 210 Z"],
+        ["Top opening", ell(120,52,26,9)],
+        ["Holes", circ(104,110,7) + " " + circ(134,140,9) + " " + circ(108,168,6) + " " + circ(140,96,5)],
+        ["Seaweed","M52 210 C46 182 58 168 50 140 M188 210 C194 182 182 168 190 140"],
+        ["Bubbles", circ(64,84,5) + " " + circ(178,62,6) + " " + circ(56,44,4)],
+        ["Sand","M40 214 C84 206 156 206 200 214"] ] },
+      { id:"pineapple", name:"Pineapple", parts:[
+        ["Body","M120 78 C152 78 168 108 168 142 C168 182 148 208 120 208 C92 208 72 182 72 142 C72 108 88 78 120 78 Z"],
+        ["Crosshatch","M82 112 C108 128 132 128 158 112 M80 148 C108 164 132 164 160 148 M96 84 C92 124 96 168 108 200 M144 84 C148 124 144 168 132 200"],
+        ["Crown leaves","M120 78 C116 56 104 44 90 40 C100 58 108 70 120 78 Z M120 78 C122 54 132 40 148 34 C142 56 134 70 120 78 Z M120 78 C120 58 120 44 120 32 C128 50 128 66 120 78 Z"] ] },
+      { id:"starfish", name:"Starfish", parts:[
+        ["Star","M120 30 L143 92 L208 96 L156 138 L170 204 L120 170 L70 204 L84 138 L32 96 L97 92 Z"],
+        ["Eyes", circ(106,118,5) + " " + circ(134,118,5)],
+        ["Smile","M106 138 C114 148 126 148 134 138"],
+        ["Dots", circ(120,72,4) + " " + circ(84,158,4) + " " + circ(156,158,4) + " " + circ(64,104,4) + " " + circ(176,104,4)],
+        ["Sand","M36 216 C80 208 160 208 204 216"] ] },
+      { id:"jellyfish", name:"Jellyfish", parts:[
+        ["Dome","M58 118 C58 66 88 44 120 44 C152 44 182 66 182 118 C166 106 154 118 142 108 C132 120 118 120 108 108 C96 118 82 108 74 118 C68 124 62 124 58 118 Z"],
+        ["Eyes", circ(100,92,6) + " " + circ(140,92,6)],
+        ["Smile","M108 106 C115 113 125 113 132 106"],
+        ["Cheeks", circ(84,104,5) + " " + circ(156,104,5)],
+        ["Tentacles","M78 122 C70 146 86 158 78 182 C72 200 82 210 80 220 M108 124 C102 148 116 160 108 184 C102 202 112 212 110 222 M134 124 C128 148 142 160 134 184 C128 202 138 212 136 222 M162 122 C154 146 170 158 162 182 C156 200 166 210 164 220"] ] },
+      { id:"car", name:"Car", parts:[
+        ["Body","M28 158 C28 138 44 130 78 126 L96 96 C100 88 108 84 120 84 L146 84 C158 84 166 90 172 102 L186 126 C204 130 212 140 212 158 L212 172 L28 172 Z"],
+        ["Windows","M104 124 L116 94 L120 94 L120 124 Z M128 94 L144 94 C152 94 158 100 164 112 L170 124 L128 124 Z"],
+        ["Wheels", circ(72,172,19) + " " + circ(168,172,19)],
+        ["Hubcaps", circ(72,172,8) + " " + circ(168,172,8)],
+        ["Door line","M124 128 L124 168 M132 146 L146 146"],
+        ["Lights","M30 148 L44 148 M196 148 L210 148"],
+        ["Road","M16 200 L224 200 M52 210 L104 210 M136 210 L188 210"] ] },
+      { id:"owl", name:"Owl", parts:[
+        ["Body", ell(120,126,58,72)],
+        ["Ear tufts","M76 66 L66 40 L94 54 M164 66 L174 40 L146 54"],
+        ["Left eye patch", circ(95,104,21)], ["Right eye patch", circ(145,104,21)],
+        ["Eyes", circ(95,106,8) + " " + circ(145,106,8)],
+        ["Beak","M111 128 L129 128 L120 142 Z"],
+        ["Belly","M92 196 C92 160 104 148 120 148 C136 148 148 160 148 196 M100 172 L140 172 M104 186 L136 186"],
+        ["Wings","M64 108 C50 140 54 168 68 182 M176 108 C190 140 186 168 172 182"],
+        ["Feet","M98 200 L98 210 M88 210 L108 210 M142 200 L142 210 M132 210 L152 210"],
+        ["Branch","M52 216 L188 216"] ] },
+      { id:"heart", name:"Heart", parts:[
+        ["Heart","M120 204 C60 162 40 128 40 94 C40 64 62 46 86 46 C102 46 116 56 120 70 C124 56 138 46 154 46 C178 46 200 64 200 94 C200 128 180 162 120 204 Z"],
+        ["Shine","M66 84 C68 70 78 60 90 58"],
+        ["Small hearts", "M52 168 C42 158 38 150 38 143 C38 135 44 131 50 131 C55 131 59 134 61 138 C63 134 67 131 72 131 C78 131 84 135 84 143 C84 150 80 158 70 168 L61 175 Z M176 40 C169 33 166 27 166 22 C166 16 170 13 175 13 C179 13 182 15 183 18 C184 15 187 13 191 13 C196 13 200 16 200 22 C200 27 197 33 190 40 L183 45 Z"] ] }
+    ];
+    const drawingById = (id) => DRAWINGS.find(d => d.id === id);
+
+    function drawingSVG(d, opts){
+      opts = opts || {};
+      const stroke = opts.stroke || "#182238";
+      const sw = opts.sw || 5;
+      const paths = d.parts.map(p =>
+        '<path d="' + p[1] + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '" stroke-linecap="round" stroke-linejoin="round"/>'
+      ).join("");
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">' + paths + "</svg>";
+    }
+    function drawingDataURL(d){ return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(drawingSVG(d)); }
+
+    /* ---------- toast ---------- */
+    let toastTimer = null;
+    function toast(msg){
+      const t = $("toast"); t.textContent = msg; t.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+    }
+
+    /* ---------- tabs ---------- */
+    document.querySelectorAll(".tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", b === btn ? "true" : "false"));
+        document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + btn.dataset.tab));
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+    function goTab(name){
+      document.querySelector('.tab[data-tab="' + name + '"]').click();
+    }
+
+    /* ---------- library ---------- */
+    const grid = $("libraryGrid");
+    DRAWINGS.forEach(d => {
+      const card = document.createElement("article");
+      card.className = "card";
+      card.innerHTML =
+        '<div class="thumb">' + drawingSVG(d) + "</div>" +
+        "<h3>" + d.name + "</h3>" +
+        '<div class="row">' +
+          '<button class="btn primary" data-act="ar">Trace in AR</button>' +
+          '<button class="btn" data-act="draw">Draw it</button>' +
+        "</div>";
+      card.querySelector('[data-act="ar"]').addEventListener("click", () => { setARSource({ type:"drawing", id:d.id }); goTab("ar"); });
+      card.querySelector('[data-act="draw"]').addEventListener("click", () => { setGuide("drawing", d.id, true); goTab("draw"); toast("Guide on the paper: " + d.name + ". Draw right over the faint lines."); });
+      grid.appendChild(card);
+    });
+
+    function fillSelect(sel, includePhoto){
+      sel.innerHTML = "";
+      DRAWINGS.forEach(d => {
+        const o = document.createElement("option");
+        o.value = d.id; o.textContent = d.name;
+        sel.appendChild(o);
+      });
+      if (includePhoto){
+        const o = document.createElement("option");
+        o.value = "__photo"; o.textContent = "My photo (line art)";
+        o.disabled = !photoLineURL;
+        sel.appendChild(o);
+      }
+      const none = document.createElement("option");
+      none.value = "__none"; none.textContent = "No guide";
+      if (sel.id === "guideSelect") sel.appendChild(none);
+    }
+
+    /* ============================================================
+       PHOTO -> BLACK & WHITE LINE ART
+       ============================================================ */
+    let photoLineURL = null;      // data URL of processed line art
+    let photoSrcCanvas = null;   // downscaled original photo
+    let photoMode = "edges";     // "edges" | "shades"
+
+    $("photoInput").addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const max = 720;
+        const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement("canvas");
+        c.width = Math.max(8, Math.round(img.naturalWidth * scale));
+        c.height = Math.max(8, Math.round(img.naturalHeight * scale));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        photoSrcCanvas = c;
+        URL.revokeObjectURL(url);
+        processPhoto();
+        toast("Photo turned into lines. Slide “Line strength” until it looks right.");
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); toast("That photo could not be opened. Try another one."); };
+      img.src = url;
+    });
+
+    $("photoModeEdges").addEventListener("click", () => setPhotoMode("edges"));
+    $("photoModeShades").addEventListener("click", () => setPhotoMode("shades"));
+    function setPhotoMode(m){
+      photoMode = m;
+      $("photoModeEdges").setAttribute("aria-pressed", m === "edges" ? "true" : "false");
+      $("photoModeShades").setAttribute("aria-pressed", m === "shades" ? "true" : "false");
+      if (photoSrcCanvas) processPhoto();
+    }
+    $("photoThresh").addEventListener("input", () => {
+      $("photoThreshOut").textContent = $("photoThresh").value;
+      if (photoSrcCanvas) processPhoto();
+    });
+
+    function processPhoto(){
+      const src = photoSrcCanvas, w = src.width, h = src.height;
+      const sctx = src.getContext("2d");
+      const data = sctx.getImageData(0, 0, w, h).data;
+      const gray = new Float32Array(w * h);
+      for (let i = 0; i < w * h; i++){
+        gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+      }
+      const out = document.createElement("canvas");
+      out.width = w; out.height = h;
+      const octx = out.getContext("2d");
+      const imgOut = octx.createImageData(w, h);
+      const od = imgOut.data;
+      const t = parseInt($("photoThresh").value, 10);
+      if (photoMode === "edges"){
+        // Sobel edge detection -> dark lines on white paper
+        for (let y = 0; y < h; y++){
+          for (let x = 0; x < w; x++){
+            const idx = y * w + x;
+            let v = 255;
+            if (x > 0 && y > 0 && x < w - 1 && y < h - 1){
+              const gx = -gray[idx - w - 1] - 2 * gray[idx - 1] - gray[idx + w - 1]
+                         + gray[idx - w + 1] + 2 * gray[idx + 1] + gray[idx + w + 1];
+              const gy = -gray[idx - w - 1] - 2 * gray[idx - w] - gray[idx - w + 1]
+                         + gray[idx + w - 1] + 2 * gray[idx + w] + gray[idx + w + 1];
+              const mag = Math.abs(gx) + Math.abs(gy);
+              v = mag > t * 3.2 ? 20 : 255;
+            }
+            od[idx * 4] = od[idx * 4 + 1] = od[idx * 4 + 2] = v;
+            od[idx * 4 + 3] = 255;
+          }
+        }
+      } else {
+        // Three-tone black & white shading (posterize around the slider)
+        for (let i = 0; i < w * h; i++){
+          const g = gray[i];
+          const v = g < t - 45 ? 25 : (g < t + 45 ? 150 : 255);
+          od[i * 4] = od[i * 4 + 1] = od[i * 4 + 2] = v;
+          od[i * 4 + 3] = 255;
+        }
+      }
+      octx.putImageData(imgOut, 0, 0);
+      photoLineURL = out.toDataURL("image/png");
+      $("photoThumb").innerHTML = '<img src="' + photoLineURL + '" alt="Your photo turned into black and white line art" />';
+      $("photoToAR").disabled = false;
+      $("photoToDraw").disabled = false;
+      refreshPhotoOptions();
+    }
+
+    $("photoToAR").addEventListener("click", () => { if (photoLineURL){ setARSource({ type:"photo" }); goTab("ar"); } });
+    $("photoToDraw").addEventListener("click", () => { if (photoLineURL){ setGuide("photo", null, true); goTab("draw"); toast("Your photo lines are under the paper. Draw right over them."); } });
+
+    function refreshPhotoOptions(){
+      // keep the photo option enabled in selects once a photo exists
+      ["arSelect", "guideSelect"].forEach(id => {
+        const sel = $(id);
+        const cur = sel.value;
+        fillSelect(sel, true);
+        if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+      });
+    }
+
+    /* ============================================================
+       AR TRACE — phone camera + floating overlay
+       ============================================================ */
+    const arState = { x: 0, y: 0, flip: false, locked: false, stream: null, track: null, torch: false };
+    const overlay = $("arOverlay");
+
+    function setARSource(src){
+      if (src.type === "photo"){
+        if (!photoLineURL) return;
+        overlay.src = photoLineURL;
+        $("arSelect").value = "__photo";
+      } else {
+        const d = drawingById(src.id);
+        overlay.src = drawingDataURL(d);
+        $("arSelect").value = src.id;
+      }
+      centerOverlay();
+    }
+    function centerOverlay(){
+      arState.x = 0; arState.y = 0;
+      applyOverlayTransform();
+    }
+    function applyOverlayTransform(){
+      const rot = parseInt($("arRotate").value, 10) || 0;
+      overlay.style.transform =
+        "translate(calc(-50% + " + arState.x + "px), calc(-50% + " + arState.y + "px))" +
+        " rotate(" + rot + "deg) scaleX(" + (arState.flip ? -1 : 1) + ")";
+      overlay.style.opacity = (parseInt($("arOpacity").value, 10) / 100).toString();
+      overlay.style.width = $("arSize").value + "%";
+      overlay.classList.toggle("locked", arState.locked);
+    }
+    $("arSelect").addEventListener("change", () => {
+      const v = $("arSelect").value;
+      if (v === "__photo") setARSource({ type: "photo" });
+      else setARSource({ type: "drawing", id: v });
+    });
+    $("arOpacity").addEventListener("input", () => { $("arOpacityOut").textContent = $("arOpacity").value + "%"; applyOverlayTransform(); });
+    $("arSize").addEventListener("input", () => { $("arSizeOut").textContent = $("arSize").value + "%"; applyOverlayTransform(); });
+    $("arRotate").addEventListener("input", () => { $("arRotateOut").textContent = $("arRotate").value + "°"; applyOverlayTransform(); });
+    $("arFlip").addEventListener("click", () => { arState.flip = !arState.flip; applyOverlayTransform(); });
+    $("arCenter").addEventListener("click", centerOverlay);
+    $("arLock").addEventListener("click", () => {
+      arState.locked = !arState.locked;
+      $("arLock").setAttribute("aria-pressed", arState.locked ? "true" : "false");
+      $("arLock").textContent = arState.locked ? "Locked — tap to unlock" : "Lock in place";
+      applyOverlayTransform();
+      toast(arState.locked ? "Picture locked. It won't slide while you trace." : "Picture unlocked — drag it to move it.");
+    });
+
+    // drag the overlay around the stage
+    (function(){
+      let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+      overlay.addEventListener("pointerdown", (e) => {
+        if (arState.locked) return;
+        dragging = true; sx = e.clientX; sy = e.clientY; ox = arState.x; oy = arState.y;
+        overlay.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      overlay.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        arState.x = ox + (e.clientX - sx);
+        arState.y = oy + (e.clientY - sy);
+        applyOverlayTransform();
+      });
+      ["pointerup", "pointercancel"].forEach(ev => overlay.addEventListener(ev, () => { dragging = false; }));
+    })();
+
+    async function startCamera(){
+      $("camError").textContent = "";
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        $("camError").textContent = "This browser or app can't open the camera. Try opening Sketchmate AR in Chrome on the phone.";
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false
+        });
+        arState.stream = stream;
+        const video = $("camVideo");
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+        $("noCam").style.display = "none";
+        overlay.style.display = "block";
+        $("camBadge").classList.add("live");
+        $("camBadgeText").textContent = "Camera on — trace the lines";
+        $("camStopBtn").disabled = false;
+        const track = stream.getVideoTracks()[0];
+        arState.track = track;
+        let torchOK = false;
+        try { torchOK = !!(track.getCapabilities && track.getCapabilities().torch); } catch (e) { torchOK = false; }
+        $("torchBtn").disabled = !torchOK;
+      } catch (err) {
+        $("camError").textContent = "Camera didn't start (" + (err && err.name ? err.name : "error") + "). Check the camera permission for this app, then try again.";
+      }
+    }
+    function stopCamera(){
+      if (arState.stream){ arState.stream.getTracks().forEach(t => t.stop()); arState.stream = null; arState.track = null; }
+      $("camVideo").srcObject = null;
+      $("noCam").style.display = "flex";
+      overlay.style.display = "none";
+      $("camBadge").classList.remove("live");
+      $("camBadgeText").textContent = "Camera off";
+      $("camStopBtn").disabled = true;
+      $("torchBtn").disabled = true;
+      arState.torch = false;
+    }
+    $("camStartBtn").addEventListener("click", startCamera);
+    $("camStopBtn").addEventListener("click", stopCamera);
+    $("torchBtn").addEventListener("click", async () => {
+      if (!arState.track) return;
+      try {
+        arState.torch = !arState.torch;
+        await arState.track.applyConstraints({ advanced: [{ torch: arState.torch }] });
+        $("torchBtn").textContent = arState.torch ? "Flashlight on" : "Flashlight";
+      } catch (e) { toast("Flashlight isn't available on this phone here."); arState.torch = false; }
+    });
+
+    /* ============================================================
+       DRAW TOGETHER — shared paper, Pivot Mate, friend rooms
+       ============================================================ */
+    const pad = $("pad");
+    const pctx = pad.getContext("2d");
+    const PW = pad.width, PH = pad.height;
+    const ME = "me", PIVOT = "pivot";
+    let myName = "Me";
+    let strokes = [];           // {by, color, size, tool, pts:[[x,y],...]}
+    let currentStroke = null;
+    let penColor = "#22304a", penSize = 6, tool = "pen";
+
+    const PEN_COLORS = [
+      ["#22304a", "Ink"], ["#d64545", "Red"], ["#ff8c1a", "Orange"], ["#e6b800", "Gold"],
+      ["#2e9e5b", "Green"], ["#0e7c86", "Teal"], ["#2f6fd0", "Blue"], ["#8e44ad", "Purple"], ["#e5639a", "Pink"]
+    ];
+    const colorRow = $("colorRow");
+    PEN_COLORS.forEach(([hex, label], i) => {
+      const b = document.createElement("button");
+      b.className = "swatch";
+      b.style.background = hex;
+      b.title = label; b.setAttribute("aria-label", "Pen color " + label);
+      b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+      b.addEventListener("click", () => {
+        penColor = hex; tool = "pen";
+        $("eraserBtn").setAttribute("aria-pressed", "false");
+        colorRow.querySelectorAll(".swatch").forEach(s => s.setAttribute("aria-pressed", s === b ? "true" : "false"));
+      });
+      colorRow.appendChild(b);
+    });
+    $("brushSize").addEventListener("input", () => { penSize = parseInt($("brushSize").value, 10); });
+    $("eraserBtn").addEventListener("click", () => {
+      tool = tool === "eraser" ? "pen" : "eraser";
+      $("eraserBtn").setAttribute("aria-pressed", tool === "eraser" ? "true" : "false");
+    });
+
+    function drawStrokeOn(ctx, s){
+      if (!s.pts.length) return;
+      ctx.save();
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.lineWidth = s.size;
+      if (s.tool === "eraser"){ ctx.globalCompositeOperation = "destination-out"; ctx.strokeStyle = "rgba(0,0,0,1)"; }
+      else { ctx.globalCompositeOperation = "source-over"; ctx.strokeStyle = s.color; }
+      ctx.beginPath();
+      ctx.moveTo(s.pts[0][0], s.pts[0][1]);
+      if (s.pts.length === 1) ctx.lineTo(s.pts[0][0] + 0.1, s.pts[0][1] + 0.1);
+      for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i][0], s.pts[i][1]);
+      ctx.stroke();
+      ctx.restore();
+    }
+    function redrawPad(){
+      pctx.clearRect(0, 0, PW, PH);
+      strokes.forEach(s => drawStrokeOn(pctx, s));
+    }
+    function padPos(e){
+      const r = pad.getBoundingClientRect();
+      return [ (e.clientX - r.left) * PW / r.width, (e.clientY - r.top) * PH / r.height ];
+    }
+    pad.addEventListener("pointerdown", (e) => {
+      pad.setPointerCapture(e.pointerId);
+      currentStroke = { by: ME, color: penColor, size: penSize, tool: tool, pts: [padPos(e)] };
+      strokes.push(currentStroke);
+      redrawPad();
+      e.preventDefault();
+    });
+    pad.addEventListener("pointermove", (e) => {
+      if (!currentStroke) return;
+      const p = padPos(e);
+      const last = currentStroke.pts[currentStroke.pts.length - 1];
+      if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 2.5) return;
+      currentStroke.pts.push(p);
+      // draw just the new segment for smoothness
+      drawStrokeOn(pctx, { color: currentStroke.color, size: currentStroke.size, tool: currentStroke.tool, pts: [last, p] });
+    });
+    ["pointerup", "pointercancel"].forEach(ev => pad.addEventListener(ev, () => {
+      if (currentStroke){ sendStroke(currentStroke); currentStroke = null; }
+    }));
+
+    $("undoBtn").addEventListener("click", () => {
+      for (let i = strokes.length - 1; i >= 0; i--){
+        if (strokes[i].by === ME){ strokes.splice(i, 1); break; }
+      }
+      redrawPad(); broadcast({ t: "undo", by: ME });
+    });
+    $("clearMineBtn").addEventListener("click", () => {
+      strokes = strokes.filter(s => s.by !== ME);
+      redrawPad(); broadcast({ t: "clear", by: ME });
+      toast("Your lines are cleared. Everyone else's lines stay.");
+    });
+    $("saveBtn").addEventListener("click", () => {
+      const out = document.createElement("canvas");
+      out.width = PW; out.height = PH;
+      const octx = out.getContext("2d");
+      octx.fillStyle = "#ffffff"; octx.fillRect(0, 0, PW, PH);
+      const finish = () => {
+        octx.drawImage(pad, 0, 0);
+        const a = document.createElement("a");
+        a.download = "sketchmate-drawing.png";
+        a.href = out.toDataURL("image/png");
+        a.click();
+        toast("Saved! Look in your downloads for sketchmate-drawing.png");
+      };
+      const under = $("underlay");
+      const svgEl = under.querySelector("svg"), imgEl = under.querySelector("img");
+      if (guideOn && svgEl){
+        const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svgEl));
+        const im = new Image();
+        im.onload = () => { octx.globalAlpha = 0.2; octx.drawImage(im, PW * 0.09, PH * 0.09, PW * 0.82, PH * 0.82); octx.globalAlpha = 1; finish(); };
+        im.onerror = finish;
+        im.src = url;
+      } else if (guideOn && imgEl){
+        const im = new Image();
+        im.onload = () => { octx.globalAlpha = 0.2; octx.drawImage(im, PW * 0.09, PH * 0.09, PW * 0.82, PH * 0.82); octx.globalAlpha = 1; finish(); };
+        im.onerror = finish;
+        im.src = imgEl.src;
+      } else finish();
+    });
+
+    /* ---------- faint guide under the paper ---------- */
+    let guideOn = false;
+    function setGuide(type, id, turnOn){
+      const under = $("underlay");
+      if (type === "photo"){
+        under.innerHTML = photoLineURL ? '<img src="' + photoLineURL + '" alt="" />' : "";
+        $("guideSelect").value = "__photo";
+      } else if (type === "none"){
+        under.innerHTML = "";
+      } else {
+        under.innerHTML = drawingSVG(drawingById(id));
+        $("guideSelect").value = id;
+      }
+      guideOn = !!turnOn;
+      under.style.display = guideOn ? "flex" : "none";
+      $("guideToggle").setAttribute("aria-pressed", guideOn ? "true" : "false");
+      $("guideToggle").textContent = guideOn ? "Hide guide" : "Show guide";
+    }
+    $("guideSelect").addEventListener("change", () => {
+      const v = $("guideSelect").value;
+      if (v === "__none") setGuide("none", null, false);
+      else if (v === "__photo") setGuide("photo", null, true);
+      else setGuide("drawing", v, true);
+    });
+    $("guideToggle").addEventListener("click", () => {
+      if (!$("underlay").innerHTML){ toast("Pick a guide picture first."); return; }
+      guideOn = !guideOn;
+      $("underlay").style.display = guideOn ? "flex" : "none";
+      $("guideToggle").setAttribute("aria-pressed", guideOn ? "true" : "false");
+      $("guideToggle").textContent = guideOn ? "Hide guide" : "Show guide";
+    });
+
+    /* ---------- who-is-drawing chips ---------- */
+    function renderWho(){
+      const who = $("whoDraws");
+      const people = [{ name: myName + " (you)", color: penColor, me: true }];
+      if (pivotActive) people.push({ name: "Pivot Mate", color: "#0e7c86" });
+      roomPeers.forEach(p => people.push({ name: p.name, color: p.color }));
+      who.innerHTML = "";
+      people.forEach(p => {
+        const chip = document.createElement("span");
+        chip.className = "who-chip";
+        chip.innerHTML = '<span class="dot" style="background:' + p.color + '"></span>';
+        chip.appendChild(document.createTextNode(p.name));
+        who.appendChild(chip);
+      });
+    }
+    $("myName").addEventListener("input", () => {
+      myName = $("myName").value.trim() || "Me";
+      renderWho();
+    });
+
+    /* ============================================================
+       PIVOT MATE — the built-in drawing partner
+       ============================================================ */
+    let pivotActive = false, pivotBusy = false, pivotIdx = 0, pivotDrawingId = "cat";
+    const PIVOT_LINES = {
+      start: ["Let's draw a {name}! I'll do one part, then you copy it. Ready? Watch my teal pen.",
+              "A {name} — good pick! I draw a part, you draw the same part. Here comes the first one."],
+      next: ["My turn — watch this part.", "Here comes the next part…", "Okay, this bit next. Watch closely!"],
+      yourTurn: ["Your turn! Draw that same part on the paper.", "Now you! Copy what I just drew.", "Over to you — same part, your pen."],
+      done: ["We did it! That's the whole {name}. Save it with the Save picture button, or pick another one.",
+             "Finished! Look at that {name} — we make a good team."]
+    };
+    function pivotSay(text){ $("pivotText").textContent = text; }
+    function pickLine(arr, name){
+      const s = arr[Math.floor(Math.random() * arr.length)];
+      return s.replace("{name}", name);
+    }
+    function pivotStatus(msg){ $("pivotStatus").textContent = msg; }
+
+    function viewToPad(pt){
+      const s = Math.min(PW, PH) * 0.82 / 240;
+      return [ (PW - 240 * s) / 2 + pt.x * s, (PH - 240 * s) / 2 + pt.y * s ];
+    }
+    function botDrawPart(dStr){
+      return new Promise((resolve) => {
+        const stage = $("measureStage");
+        stage.innerHTML = "";
+        const path = document.createElementNS(SVGNS, "path");
+        path.setAttribute("d", dStr);
+        stage.appendChild(path);
+        let len = 0;
+        try { len = path.getTotalLength(); } catch (e) { resolve(); return; }
+        if (!len){ resolve(); return; }
+        const stroke = { by: PIVOT, color: "#0e7c86", size: 6, tool: "pen", pts: [] };
+        strokes.push(stroke);
+        const dur = Math.min(2400, Math.max(600, len * 3.2));
+        const t0 = performance.now();
+        let lastPt = null;
+        function frame(t){
+          const k = Math.min(1, (t - t0) / dur);
+          const target = len * k;
+          const steps = Math.max(1, Math.floor(target / 3));
+          stroke.pts.length = 0;
+          for (let i = 0; i <= steps; i++){
+            stroke.pts.push(viewToPad(path.getPointAtLength(target * i / steps)));
+          }
+          const cur = stroke.pts[stroke.pts.length - 1];
+          if (lastPt && cur) drawStrokeOn(pctx, { color: stroke.color, size: stroke.size, tool: "pen", pts: [lastPt, cur] });
+          else redrawPad();
+          lastPt = cur;
+          if (k < 1) requestAnimationFrame(frame);
+          else { redrawPad(); sendStroke(stroke); resolve(); }
+        }
+        requestAnimationFrame(frame);
+      });
+    }
+
+    async function pivotDrawNext(auto){
+      if (pivotBusy) return;
+      const d = drawingById(pivotDrawingId);
+      if (pivotIdx >= d.parts.length){
+        pivotSay(pickLine(PIVOT_LINES.done, d.name));
+        pivotStatus("Picture finished. Pick another, or press “Start picture over”.");
+        return;
+      }
+      pivotBusy = true;
+      pivotActive = true;
+      renderWho();
+      const [partName, dStr] = d.parts[pivotIdx];
+      if (pivotIdx === 0) pivotSay(pickLine(PIVOT_LINES.start, d.name));
+      else pivotSay(pickLine(PIVOT_LINES.next, d.name));
+      pivotStatus("Pivot Mate is drawing: " + partName + "…");
+      await botDrawPart(dStr);
+      pivotIdx++;
+      pivotBusy = false;
+      if (pivotIdx >= d.parts.length){
+        pivotSay(pickLine(PIVOT_LINES.done, d.name));
+        pivotStatus("All done — " + d.parts.length + " parts, drawn together.");
+      } else {
+        pivotSay(pickLine(PIVOT_LINES.yourTurn, d.name) + " Next up is the " + d.parts[pivotIdx][0].toLowerCase() + ".");
+        pivotStatus("Your turn! Next part: " + d.parts[pivotIdx][0] + ".");
+      }
+      if (auto && pivotIdx < d.parts.length){
+        setTimeout(() => pivotDrawNext(true), 1100);
+      }
+    }
+    $("pivotNext").addEventListener("click", () => pivotDrawNext(false));
+    $("pivotAll").addEventListener("click", () => pivotDrawNext(true));
+    $("pivotReset").addEventListener("click", () => {
+      strokes = strokes.filter(s => s.by !== PIVOT);
+      pivotIdx = 0;
+      redrawPad(); broadcast({ t: "clear", by: PIVOT });
+      pivotSay("Fresh start! Press “Pivot, draw the next part” whenever you're ready.");
+      pivotStatus("Pivot is ready when you are.");
+    });
+    $("pivotSelect").addEventListener("change", () => {
+      pivotDrawingId = $("pivotSelect").value;
+      pivotIdx = 0;
+      pivotSay("Okay — " + drawingById(pivotDrawingId).name + " it is. I draw a part, you draw it too.");
+      pivotStatus("Pivot is ready when you are.");
+    });
+
+    /* ============================================================
+       FRIEND ROOMS — friends only, joined by a shared code.
+       Needs the internet (the two phones have to reach each other);
+       everything else in the app works offline.
+       ============================================================ */
+    const PEER_PREFIX = "sketchmate-ar-v1-";
+    const FRIEND_COLORS = ["#d64545", "#2f6fd0", "#2e9e5b", "#e5639a", "#ff8c1a", "#8e44ad"];
+    let peer = null, roomConns = [], roomPeers = [], isHost = false, myRoomCode = null;
+
+    function roomStatus(msg, cls){
+      const el = $("roomStatus");
+      el.textContent = msg;
+      el.className = "status-line" + (cls ? " " + cls : "");
+    }
+    function broadcast(msg){
+      roomConns.forEach(c => { try { if (c.open) c.send(msg); } catch (e) {} });
+    }
+    function sendStroke(s){
+      if (!roomConns.length) return;
+      broadcast({ t: "stroke", stroke: { by: s.by === ME ? myName : "Pivot Mate", color: s.color, size: s.size, tool: s.tool, pts: s.pts } });
+    }
+    function peerLibReady(){ return typeof window.Peer !== "undefined"; }
+
+    function wireConn(conn, knownName){
+      conn.on("open", () => {
+        if (!roomConns.includes(conn)) roomConns.push(conn);
+        conn.send({ t: "hello", name: myName, color: penColor });
+        if (isHost){
+          // bring the newcomer up to date with the whole paper
+          conn.send({ t: "sync", strokes: strokes.map(s => ({ by: s.by === ME ? myName : (s.by === PIVOT ? "Pivot Mate" : s.by), color: s.color, size: s.size, tool: s.tool, pts: s.pts })) });
+        }
+        updateRoomUI();
+      });
+      conn.on("data", (msg) => {
+        if (!msg || !msg.t) return;
+        if (msg.t === "hello"){
+          const color = FRIEND_COLORS[roomPeers.length % FRIEND_COLORS.length];
+          roomPeers = roomPeers.filter(p => p.peer !== conn.peer);
+          roomPeers.push({ peer: conn.peer, name: msg.name || "Friend", color: color });
+          roomStatus(msg.name + " joined the paper. Say hi and start drawing!", "ok");
+          toast((msg.name || "A friend") + " is on the paper now.");
+          renderWho(); updateRoomUI();
+        } else if (msg.t === "stroke"){
+          strokes.push(msg.stroke);
+          drawStrokeOn(pctx, msg.stroke);
+        } else if (msg.t === "sync"){
+          strokes = msg.strokes.map(s => ({ by: s.by === myName ? ME : s.by, color: s.color, size: s.size, tool: s.tool, pts: s.pts }));
+          redrawPad();
+          roomStatus("You're on the shared paper. Everything here is live — draw away!", "ok");
+        } else if (msg.t === "undo"){
+          const who = msg.by === ME ? myName : msg.by;
+          for (let i = strokes.length - 1; i >= 0; i--){
+            if (strokes[i].by === who || (who === myName && strokes[i].by === ME)){ strokes.splice(i, 1); break; }
+          }
+          redrawPad();
+        } else if (msg.t === "clear"){
+          const who = msg.by === PIVOT ? PIVOT : (msg.by === ME ? myName : msg.by);
+          strokes = strokes.filter(s => s.by !== who && !(who === myName && s.by === ME));
+          redrawPad();
+        }
+      });
+      const gone = () => {
+        roomConns = roomConns.filter(c => c !== conn);
+        const left = roomPeers.find(p => p.peer === conn.peer);
+        roomPeers = roomPeers.filter(p => p.peer !== conn.peer);
+        if (left) toast(left.name + " left the paper.");
+        renderWho(); updateRoomUI();
+      };
+      conn.on("close", gone);
+      conn.on("error", gone);
+    }
+    function updateRoomUI(){
+      const inRoom = !!peer;
+      $("leaveRoomBtn").disabled = !inRoom;
+      $("roomCodeBox").hidden = !(inRoom && myRoomCode);
+      if (inRoom && myRoomCode) $("roomCodeBox").textContent = myRoomCode;
+      if (inRoom && !roomPeers.length && isHost) roomStatus("Room is open. Tell your friend the code so they can join.", "ok");
+      if (inRoom && !isHost && !roomPeers.length) roomStatus("Connected — waiting for your friend to appear…", "ok");
+    }
+    function destroyRoom(silent){
+      roomConns.forEach(c => { try { c.close(); } catch (e) {} });
+      roomConns = []; roomPeers = [];
+      if (peer){ try { peer.destroy(); } catch (e) {} peer = null; }
+      isHost = false; myRoomCode = null;
+      renderWho(); updateRoomUI();
+      if (!silent) roomStatus("Not in a room — drawing on your own paper.");
+    }
+    function roomError(err){
+      const type = err && err.type ? err.type : "";
+      if (type === "peer-unavailable") roomStatus("That room code didn't work. Check the code with your friend and try again.", "warn");
+      else if (type === "unavailable-id") roomStatus("That code is taken right now. Create the room again for a fresh code.", "warn");
+      else roomStatus("Room connection hit a problem (" + (type || "network") + "). Check the internet and try again.", "warn");
+      destroyRoom(true);
+      roomStatus($("roomStatus").textContent, "warn");
+    }
+    function newRoomCode(){
+      const letters = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+      let code = "";
+      for (let i = 0; i < 4; i++) code += letters[Math.floor(Math.random() * letters.length)];
+      return code;
+    }
+    $("createRoomBtn").addEventListener("click", () => {
+      if (!peerLibReady()){ roomStatus("Friend rooms need the internet — the room service couldn't load. Everything else still works offline.", "warn"); return; }
+      destroyRoom(true);
+      myRoomCode = newRoomCode();
+      isHost = true;
+      peer = new Peer(PEER_PREFIX + myRoomCode);
+      peer.on("open", () => { updateRoomUI(); roomStatus("Room is open! Tell your friend this code: " + myRoomCode, "ok"); });
+      peer.on("connection", (conn) => wireConn(conn));
+      peer.on("error", roomError);
+      roomStatus("Opening your room…");
+    });
+    $("joinRoomBtn").addEventListener("click", () => {
+      const code = $("joinCode").value.trim().toUpperCase();
+      if (code.length !== 4){ roomStatus("Type the 4-letter code your friend gave you.", "warn"); return; }
+      if (!peerLibReady()){ roomStatus("Friend rooms need the internet — the room service couldn't load. Everything else still works offline.", "warn"); return; }
+      destroyRoom(true);
+      isHost = false; myRoomCode = code;
+      peer = new Peer();
+      peer.on("open", () => {
+        const conn = peer.connect(PEER_PREFIX + code, { reliable: true });
+        wireConn(conn);
+        roomStatus("Joining room " + code + "…");
+        updateRoomUI();
+      });
+      peer.on("error", roomError);
+      roomStatus("Connecting…");
+    });
+    $("leaveRoomBtn").addEventListener("click", () => { destroyRoom(false); toast("You left the room. The paper is yours alone again."); });
+
+    /* ---------- init ---------- */
+    fillSelect($("arSelect"), true);
+    fillSelect($("pivotSelect"), false);
+    fillSelect($("guideSelect"), true);
+    $("guideSelect").value = "__none";
+    setGuide("none", null, false);
+    setARSource({ type: "drawing", id: "sponge" });
+    $("pivotSelect").value = "cat";
+    pivotDrawingId = "cat";
+    applyOverlayTransform();
+    renderWho();
+    redrawPad();
+    </script>
+  </body>
+</html>
