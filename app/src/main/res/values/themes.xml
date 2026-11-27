@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.SketchmateAR" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.SketchmateAR" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Teal, the Pivot Mate pen colour in the app. -->
         <item name="colorPrimary">#0E7C86</item>
         <item name="colorPrimaryDark">#0A5E66</item>
